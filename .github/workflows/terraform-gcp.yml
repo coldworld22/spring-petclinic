@@ -1,0 +1,27 @@
+name: Terraform (GCP)
+
+on:
+  push:
+    paths:
+      - "infra/gcp/**"
+      - ".github/workflows/terraform-gcp.yml"
+  pull_request:
+    paths:
+      - "infra/gcp/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infra/gcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive -diff
+      - run: terraform init -backend=false
+      - run: terraform validate
