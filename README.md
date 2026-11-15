@@ -1,3 +1,67 @@
+# Spring PetClinic on Google Cloud
+
+[![Terraform (GCP)](https://github.com/coldworld22/spring-petclinic/actions/workflows/terraform-gcp.yml/badge.svg)](https://github.com/coldworld22/spring-petclinic/actions/workflows/terraform-gcp.yml)
+![Cloud Run](https://img.shields.io/badge/Cloud%20Run-4285F4?logo=googlecloud&logoColor=white)
+![Cloud SQL](https://img.shields.io/badge/Cloud%20SQL-PostgreSQL%2016-4169E1?logo=postgresql&logoColor=white)
+![Terraform](https://img.shields.io/badge/Terraform-7B42BC?logo=terraform&logoColor=white)
+
+This fork takes the official Spring PetClinic and makes it production-ready on Google Cloud **without changing a line of application code**. Everything is in [`infra/gcp`](infra/gcp) and two GitHub Actions workflows.
+
+## What this fork adds
+
+```mermaid
+flowchart LR
+    U[Browser] -->|HTTPS| RUN[Cloud Run<br/>PetClinic, scales to zero]
+    RUN -->|Direct VPC egress<br/>private IP, TLS| SQL[(Cloud SQL<br/>PostgreSQL 16)]
+    SM[Secret Manager] -.->|DB password| RUN
+    GH[GitHub Actions] -->|Workload Identity<br/>Federation| AR[Artifact Registry]
+    AR -->|image| RUN
+```
+
+- **Cloud Run** runs the app and scales to zero when nobody is using it, so an idle demo costs almost nothing.
+- **Cloud SQL for PostgreSQL 16** has **no public IP**. Cloud Run reaches it over the VPC with Direct VPC egress, so no Serverless VPC connector is needed, and connections must use TLS. Daily backups and point-in-time recovery are on.
+- **Secret Manager** holds the database password. Terraform generates it and Cloud Run injects it at start-up; it never appears in the repository or in a workflow.
+- **Artifact Registry** stores images built with Cloud Native Buildpacks (`spring-boot:build-image`), so there's no Dockerfile to maintain. It keeps the 10 most recent images.
+- **Workload Identity Federation:** GitHub Actions gets short-lived credentials. Only the `main` branch of this repository may deploy, and no service account key exists anywhere.
+- **Least-privilege service accounts:** the app can read only its own secret. The deployer can only push images and roll out new revisions.
+- **Hardening:** upstream exposes every actuator endpoint, which is fine on a laptop. In the cloud, only `health` and `info` are exposed. Startup and liveness probes use `/actuator/health`.
+- **Default region `me-central2` (Dammam, Saudi Arabia)**, to keep data in the Kingdom.
+
+## Running on Google Cloud
+
+You need a Google Cloud project with billing, the `gcloud` CLI and Terraform.
+
+```bash
+gcloud auth application-default login
+cd infra/gcp
+cp terraform.tfvars.example terraform.tfvars   # set project_id
+terraform init
+terraform apply
+```
+
+The first apply runs a placeholder image. To deploy PetClinic itself, add these **repository variables** in GitHub (Settings → Secrets and variables → Actions → Variables), using the Terraform outputs:
+
+| Variable | Value |
+|---|---|
+| `GCP_PROJECT_ID` | your project ID |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | output `workload_identity_provider` |
+| `GCP_DEPLOY_SERVICE_ACCOUNT` | output `deployer_service_account` |
+
+Then run **Deploy to Google Cloud Run** from the Actions tab. It builds the image, pushes it, deploys a new revision and prints the URL.
+
+**Cost:** Cloud Run is within the free tier for a demo. The `db-f1-micro` database is the main cost, at roughly 10–15 USD a month. Run `terraform destroy` to remove everything.
+
+## Design decisions
+
+- **Why no code changes?** PetClinic already reads its database settings from environment variables. Keeping the fork's diff to infrastructure makes it easy to pull in upstream updates, and shows that the platform work is separate from the app.
+- **Why private IP instead of the Cloud SQL Auth Proxy?** The database simply has no public address, so there's nothing to attack from the internet. Direct VPC egress gives Cloud Run a route to it without paying for a VPC connector.
+- **Why does Terraform ignore the container image?** Terraform owns the infrastructure, and the pipeline owns releases. Without `ignore_changes`, every `terraform apply` would roll the service back to whatever image was in the code.
+- **Why Workload Identity Federation?** A leaked service account key is valid until someone notices. A federated token lasts minutes and only works for this repository's `main` branch.
+
+---
+
+*The original PetClinic README follows.*
+
 # Spring PetClinic Sample Application [![Build Status](https://github.com/spring-projects/spring-petclinic/actions/workflows/maven-build.yml/badge.svg)](https://github.com/spring-projects/spring-petclinic/actions/workflows/maven-build.yml)[![Build Status](https://github.com/spring-projects/spring-petclinic/actions/workflows/gradle-build.yml/badge.svg)](https://github.com/spring-projects/spring-petclinic/actions/workflows/gradle-build.yml)
 
 [![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/spring-projects/spring-petclinic) [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?hide_repo_select=true&ref=main&repo=7517918)
